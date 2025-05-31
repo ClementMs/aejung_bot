@@ -1,4 +1,4 @@
-# Adaptation du notebook du cours d'IA générative sur Kaggle par Clément Msika
+# Adaptation du notebook du cours d'IA générative sur Kaggle par Clément Msika en utilisant Mistral et ChatGPT
 # https://www.kaggle.com/learn-guide/5-day-genai
 # -*- coding: utf-8 -*-
 # Copyright 2025 Google LLC
