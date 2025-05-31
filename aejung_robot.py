@@ -16,14 +16,14 @@
 # limitations under the License.
 
 
-from typing import Annotated
+from typing import Annotated, Literal, Annotated, List
 from typing_extensions import TypedDict
-from typing import Annotated, List
 
 from langgraph.graph.message import add_messages
 from langchain_core.messages.ai import AIMessage
 from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.tools import tool
 
 import os
 
@@ -56,20 +56,29 @@ class RobotAeJung():
         self.messageBienvenue = None
         self.etatCommande = EtatCommande(messages=[], commande=[], fin=False)
         self.nomModeleIAGenerative = 'gemini'
+        self.menu = None
     
 
     def boutonAeJung(self, etatCommande):      
-      '''
-      Un chatbot. Le wrapper autour de l'interface chat du modèle. 
-      '''
+        '''
+        Un chatbot. Le wrapper autour de l'interface chat du modèle. 
+        '''
 
-      #self.nomModeleIAGenerative = nomModeleIAGenerative
-      llm = ChatGoogleGenerativeAI(model = 'gemini-1.5-flash-latest')
-      if self.nomModeleIAGenerative == 'gemini':
-          llm = ChatGoogleGenerativeAI(model = 'gemini-1.5-flash-latest')
+        if self.nomModeleIAGenerative == 'gemini':
+            llm = ChatGoogleGenerativeAI(model = 'gemini-1.5-flash-latest')
 
-      historiqueMessages = [self.aeJungSystint] + etatCommande["messages"]
-      return {"messages": [llm.invoke(historiqueMessages)]}
+
+        if etatCommande:
+
+            messageSortie = llm.invoke([self.aeJungSystint] + etatCommande["messages"])
+
+        else:
+
+            messageSortie = AIMessage(output = messageBienvenue)
+
+        return etatCommande | {"messages": [messageSortie]}
+
+
 
     def initialisation(self, etatCommande: EtatCommande, messageUtilisateur, aeJungSystint):
 
@@ -79,24 +88,27 @@ class RobotAeJung():
 
         self.messageUtilisateur = messageUtilisateur
 
-        constructeurGraphes = StateGraph(EtatCommande)
+        aeJungGraphe = StateGraph(EtatCommande)
          
-        constructeurGraphes.add_node('robotAeJung', self.boutonAeJung)
-
-         
-        #constructeurGraphes.add_node('robotAeJung', self.boutonAeJung(self.aeJungSystint, self.etatCommande, 'gemini'))
-
-        constructeurGraphes.add_edge(START, 'robotAeJung')
-
-        aeJungGraphe = constructeurGraphes.compile()
+        aeJungGraphe.add_node('robotAeJung', self.boutonAeJung)
+        aeJungGraphe.add_node('humain', self.noeudHumain)
         
-        etat = aeJungGraphe.invoke({"messages": [self.messageUtilisateur]})
+        aeJungGraphe.add_edge(START, 'robotAeJung')
+        aeJungGraphe.add_edge('robotAeJung', 'humain')
+        aeJungGraphe.add_conditional_edges('humain', self.possiblementQuitterNoeudHumain)
+        aeJungGraphe.compile()
         
-
-        for message in etat["messages"]:
-            print(f"{type(message).__name__}: {message.content}")
-
         return aeJungGraphe
+
+    def possiblementQuitterNoeudHumain(etatCommande: EtatCommande) -> Literal["robotAeJung", "__end__"]:
+        '''
+        Voie vers le chatbot à moins que l'utilisateur est en train de partir
+        '''
+        if etatCommande.get('fin', False):
+            return END
+        else:
+            return "robotAeJung"
+
 
     def noeudHumain(self,etatCommande: EtatCommande) -> EtatCommande:
         '''
@@ -135,6 +147,17 @@ class RobotAeJung():
         return self.etatCommande | {"messages": [messageSortie]}
 
 
+    @tool
+    def afficher_menu(self, menu) -> str:
+        '''
+        Présente la dernière version à jour du menu.
+        '''
+        # Note that this is just hard-coded text, but you could connect this to a live stock
+        # database, or you could use Gemini's multi-modal capabilities and take live photos of
+        # your cafe's chalk menu or the products on the counter and assemble them into an input.
+        self.menu = menu
+        return self.menu
+
 aeJungSystint = (
     "system",  # 'system' indique que le message est une instruction système.
     "Vous êtes un robot de commande pour un restaurant de street food coréen, un système interactif de commande de restaurant coréen. Un humain va vous parler des "
@@ -158,6 +181,62 @@ aeJungSystint = (
 
 # C'est le message avec lequel le système ouvre la conversation.
 messageBienvenue = "Bienvenue chez Ae Jung, un restaurant authentique de street food coréenne situé au cœur de Paris. Tapez `q` pour quitter. Comment puis-je vous servir aujourd'hui ?"
+
+
+
+menu = '''
+
+        1) MENU (en incluant le riz et les légumes):
+        Poulet épicé (Yangneom): 11,5 euros
+        Poulet sucré (Ganjang): 11,5 euros
+        Poulet fromage: 11,5 euros
+
+        2) Tteokbokki: 15 euros
+        Tteokbokki fromage: 17 euros
+
+        3) Morceaux de poulet coréen à l'unité sans le MENU:
+        Soit épicé (Yangneom), sucré (Ganjang), ou fromage
+        => Petit (5 pièces): 8 euros
+        => Moyen (12 pièces): 16 euros
+        => Grand (22 pièces): 30 euros
+
+        4) Bento coréen: 14 euros
+        3 options: sauce épicée, parmesan, ou sucrée (ganjang)
+
+        5) Mandu: (5 pièces)
+        7 euros
+
+        6) Corn dogs (Hallal)
+        4 options:
+        a) fromage, saucisse, pommes de terre: 6,5 euros
+        b) fromage, saucisse: 5,5 euros
+        c) fromage, pommes de terre: 6,5 euros
+        d) fromage: 5,5 euros
+
+        7) Boissons
+
+        a) Boissons non-alcoolisées en excluant le thé: 2 euros
+
+        - Volvic
+        - Lipton Ice Tea
+        - San Pellegrino
+        - Coca-Cola: Coca-Cola Zero, aromatisé à la cerise ou normal
+
+        b) Thé
+
+       3 options de thé options: gingembre, yuzu (citron coréen), prune verte
+
+       - glacé: 5,5 euros
+       - chaud: 5 euros
+
+
+       3 options de bubble tea (6 euros):
+       - lait aromatisé au sucre de canne et aux perles de tapiocca
+       - lait aromatisé au matcha et aux perles de tapioca
+       - lait aromatisé au taro et aux perles de tapioca      
+
+'''
+
 
 etatCommande = etatCommande = EtatCommande(messages=[], commande=[], fin=False)
 robotAeJung = RobotAeJung(aeJungSystint = aeJungSystint, messageBienvenue = messageBienvenue)
