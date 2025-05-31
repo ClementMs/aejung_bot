@@ -55,24 +55,20 @@ class RobotAeJung():
         self.aeJungSystint = None
         self.messageBienvenue = None
         self.etatCommande = EtatCommande(messages=[], commande=[], fin=False)
-        #self.etatCommandes = {'messages': Annotated[list, add_messages], 'commande': list[str], 'fin': bool}
-        self.nomModeleIAGenerative = None
+        self.nomModeleIAGenerative = 'gemini'
     
 
-    def boutonAeJung(self, aeJungSystint, etatCommande, nomModeleIAGenerative):
-      
+    def boutonAeJung(self, etatCommande):      
       '''
       Un chatbot. Le wrapper autour de l'interface chat du modèle. 
       '''
 
-      self.nomModeleIAGenerative = nomModeleIAGenerative
-      
+      #self.nomModeleIAGenerative = nomModeleIAGenerative
+      llm = ChatGoogleGenerativeAI(model = 'gemini-1.5-flash-latest')
       if self.nomModeleIAGenerative == 'gemini':
           llm = ChatGoogleGenerativeAI(model = 'gemini-1.5-flash-latest')
 
-      self.aeJungSystint = aeJungSystint
-      self.etatCommande = etatCommande
-      historiqueMessages = [self.aeJungSystint] + self.etatCommande["messages"]
+      historiqueMessages = [self.aeJungSystint] + etatCommande["messages"]
       return {"messages": [llm.invoke(historiqueMessages)]}
 
     def initialisation(self, etatCommande: EtatCommande, messageUtilisateur, aeJungSystint):
@@ -84,20 +80,23 @@ class RobotAeJung():
         self.messageUtilisateur = messageUtilisateur
 
         constructeurGraphes = StateGraph(EtatCommande)
+         
+        constructeurGraphes.add_node('robotAeJung', self.boutonAeJung)
 
+         
         #constructeurGraphes.add_node('robotAeJung', self.boutonAeJung(self.aeJungSystint, self.etatCommande, 'gemini'))
 
-        #constructeurGraphes.add_edge(START, 'robotAeJung')
+        constructeurGraphes.add_edge(START, 'robotAeJung')
 
-        #aeJungGraphe = constructeurGraphes.compile()
+        aeJungGraphe = constructeurGraphes.compile()
+        
+        etat = aeJungGraphe.invoke({"messages": [self.messageUtilisateur]})
+        
 
-        #etat = aeJungGraphe.invoke({"messages": [self.messageUtilisateur]})
+        for message in etat["messages"]:
+            print(f"{type(message).__name__}: {message.content}")
 
-
-        #for message in etat["messages"]:
-#            print(f"{type(message).__name__}: {message.content}")
-
-        #return aeJungGraphe
+        return aeJungGraphe
 
     def noeudHumain(self,etatCommande: EtatCommande) -> EtatCommande:
         '''
@@ -105,7 +104,6 @@ class RobotAeJung():
         '''
         self.etatCommande = etatCommande
         dernierMessage = self.etatCommande["messages"][-1]
-        print("Model:", dernierMessage.content)
 
         inputUtilisateur = input("Utilisateur: ")
 
