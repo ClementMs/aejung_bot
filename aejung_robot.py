@@ -21,9 +21,15 @@ from typing_extensions import TypedDict
 
 from langgraph.graph.message import add_messages
 from langchain_core.messages.ai import AIMessage
-from langgraph.graph import StateGraph, START, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.tools import tool
+from langchain_core.messages.tool import ToolMessage
+from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import ToolNode, InjectedState
+
+from collections.abc import Iterable
+from random import randint
+
 
 import os
 
@@ -38,10 +44,9 @@ class EtatCommande(TypedDict):
     # La conversation de commande. Cela préserve l'historique de conversation entre les noeuds.
     # l'annotation `add_messages` indique à LangGraph que le statut est mis à jour en ajoutant les messages retournés et en ne les remplaçant pas.
     messages: Annotated[list, add_messages]
-
     # La commande en cours de traitement du client.
     # chaque commande est une liste de texte
-    commande: list[str]
+    commande: List[str]
     #order: list[tuple]
 
     # Note indiquant que la prise de commande est confirmée et terminée.
@@ -50,27 +55,27 @@ class EtatCommande(TypedDict):
     
 class RobotAeJung():
 
-    def __init__(self, aeJungSystint, messageBienvenue):
+    def __init__(self, aeJungInstructionsModele, messageBienvenue, menu):
 
-        self.aeJungSystint = None
+        self.aeJungInstructionsModele = None
         self.messageBienvenue = None
         self.etatCommande = EtatCommande(messages=[], commande=[], fin=False)
         self.nomModeleIAGenerative = 'gemini'
         self.menu = None
+        self.modeleLangageMassif = None
     
 
     def boutonAeJung(self, etatCommande):      
         '''
-        Un chatbot. Le wrapper autour de l'interface chat du modèle. 
+        Un agent conversationnel. Le wrapper autour de l'interface du modèle. 
         '''
+        defaults = {"commande": [], "fin": False}
 
-        if self.nomModeleIAGenerative == 'gemini':
-            llm = ChatGoogleGenerativeAI(model = 'gemini-1.5-flash-latest')
-
+            
 
         if etatCommande:
 
-            messageSortie = llm.invoke([self.aeJungSystint] + etatCommande["messages"])
+            messageSortie = self.modeleLangageMassif.invoke([self.aeJungInstructionsModele] + etatCommande["messages"])
 
         else:
 
@@ -78,31 +83,178 @@ class RobotAeJung():
 
         return etatCommande | {"messages": [messageSortie]}
 
+    def noeudCommande(etatCommande: EtatCommande) -> EtatCommande:
+        '''
+        Le noeud de commande. C'est ici que l'état de la commande est modifié.
+        6 appels possible: afficherMenu, ajouterCommande, confirmerCommande, prendreCommande, reinitialiserCommande, executerCommande 
+        '''
+        messageOutil = etatCommande.get("messages", [])[-1]
+        commande = etatCommande.get("commande", [])
+        messagesEnvoi = []
+        elementsSupprimer = []
+        commandePrise = False
+
+        for appelOutil in messageOutil.appelOutils:
+
+            if appelOutil["name"] == "ajouterCommande":
+
+                #print('current order: ' + str(commande))
+
+                # Chaque élément de la commande est défini par du texte. C'est ici que que ces éléments sont transformés en boissons (modificateurs,...).
+                modificateurs = appelOutil["args"]["modificateurs"]
+                texteModificateur = ", ".join(modificateurs) if modifiers else "pas de modificateurs"
 
 
-    def initialisation(self, etatCommande: EtatCommande, messageUtilisateur, aeJungSystint):
+
+                commande.append(f'{appelOutil["args"]["elementsPlatBoisson"]} ({texteModificateur})')
+                reponse = "\n".join(commande)
+
+            if appelOutil["name"] == "afficherMenu":
+                return self.menu
+
+            elif appelOutil["name"] == "confirmerCommande":
+
+                # We could entrust the LLM to do order confirmation, but it is a good practice to
+                # show the user the exact data that comprises their order so that what they confirm
+                # precisely matches the order that goes to the kitchen - avoiding hallucination
+                # or reality skew.
+
+                # In a real scenario, this is where you would connect your POS screen to show the
+                # order to the user.
+
+                print("Votre commande:")
+                if not commande:
+                    print("  (pas d'éléments)")
+
+                for elementsPlatBoisson in commande:
+                    print(f"  {elementsPlatBoisson}")
+
+                reponse = input("Est-ce correct? ")
+
+            elif appelOutil["name"] == "prendreCommande":
+
+                reponse = "\n".join(commande) if order else "(pas de commande)"
+
+
+            #elif appelOutil["name"] == "enleverElementsCommande":
+
+            #    print(commande)
+
+            # Each order item is just a string. This is where it assembled as "drink (modifiers, ...)".
+            #    modifiers = tool_call["args"]["modifiers"]
+            #    modifier_str = ", ".join(modifiers) if modifiers else "no modifiers"
+
+            #    print('modifier_str: '  + str(modifier_str))
+
+            #    items_to_remove.append(tool_call["args"]["food_drink_item"])
+
+            #    print('tool_call["args"]["food_drink_item"]: ' + str(tool_call["args"]["food_drink_item"]))
+
+            #    print('items to remove: ' + str(items_to_remove))
+
+                #order.pop(f'{tool_call["args"]["food_drink_item"]} ({modifier_str})')
+
+                #response = "\n".join(commande)
+
+            elif appelOutil["name"] == "reinitialiserCommande":
+
+                commande.clear()
+                reponse = None
+
+            elif appelOutil["name"] == "executerCommande":
+
+                commandeTexte = "\n".join(commande)
+                print("Envoi de la commande en cuisine!")
+                print(commandeTexte)
+
+            # Préparer les plats et boissons!.
+                commandePrise = True
+                delaiPreparationLivraisonCommande = str(randint(1, 5))  # delai de préparation et de livraison de la commande en  minutes
+                reponseExecutionCommande = 'Votre commande sera prête dans {delaiPreparationLivraisonCommande} minutes'
+
+                print(reponseExecutionCommande)
+
+                # préparer les paramètres d'entrée
+                self.generateurVoix(reponseExecutionCommande)
+
+            else:
+                raise NotImplementedError(f'Appel outil inconnu: {appelOutil["name"]}')
+
+            # Enregistre les résultats de l'outil comme message d'outil.
+            messagesEnvoi.append(
+                ToolMessage(
+                    content=reponse,
+                    name=appelOutil["name"],
+                    tool_call_id=appelOutil["id"],
+                )
+            )
+
+        return {"messages": messagesEnvoi, "commande": commande, "fin": commandePrise}
+
+    def generateurVoix(self, texte):
+        '''
+        Utilisé notamment dans la fonction prendreCommande de noeudCommande.
+        '''
+        #prompteur_texte = "Votre commande sera prête dans 5 minutes."
+        parametresEntree = processor(texte)
+        # generate speech
+        sortieVoix = model.generate(**parametresEntree.to(appareil))
+
+        tauxEchantillonnage = model.generation_config.sample_rate
+        return Audio(speech_output[0].cpu().numpy(), rate=tauxEchantillonnage)
+
+    def initialisation(self, etatCommande: EtatCommande, messageUtilisateur, aeJungInstructionsModele)  -> StateGraph:
+        
+        self.aeJungInstructionsModele = aeJungInstructionsModele
 
         self.etatCommande = etatCommande
-
-        self.aeJungSystint = aeJungSystint
-
+        
         self.messageUtilisateur = messageUtilisateur
+
+        outilsAutomatisation = [self.afficherMenu]
+        noeudOutil = ToolNode(outilsAutomatisation)
+
+        outilsCommande = [self.ajouterCommande, self.enleverElementsCommande, self.confirmerCommande, self.prendreCommande, self.supprimerCommande, self.executerCommande]
+
+        self.modeleLangageMassif = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest")        
+
+        self.modeleLangageMassif = self.modeleLangageMassif.bind_tools(outilsAutomatisation + outilsCommande)        
+
+        # besoin d'initaliser le modèle de langage massif avant car on ne peut pas utiliser de variables dans les fonctions appelées avec add_node? 
+        #outilsAutomatisation = [self.afficherMenu(self.menu)]
+        #noeudOutil = ToolNode([])
+        #noeudOutil = ToolNode(outilsAutomatisation)
+       
 
         aeJungGraphe = StateGraph(EtatCommande)
          
         aeJungGraphe.add_node('robotAeJung', self.boutonAeJung)
         aeJungGraphe.add_node('humain', self.noeudHumain)
-        
-        aeJungGraphe.add_edge(START, 'robotAeJung')
-        aeJungGraphe.add_edge('robotAeJung', 'humain')
+        aeJungGraphe.add_node('outils', noeudOutil)
+        aeJungGraphe.add_node('priseCommande', self.noeudCommande)
+
+        aeJungGraphe.add_conditional_edges('robotAeJung', self.possiblementVoieVersOutils)
         aeJungGraphe.add_conditional_edges('humain', self.possiblementQuitterNoeudHumain)
-        aeJungGraphe.compile()
         
+        aeJungGraphe.add_edge('outils', 'robotAeJung')
+        aeJungGraphe.add_edge('priseCommande', 'robotAeJung')
+        aeJungGraphe.add_edge(START, 'robotAeJung')
+        
+        aeJungGraphe = aeJungGraphe.compile()
+        
+
         return aeJungGraphe
 
-    def possiblementQuitterNoeudHumain(etatCommande: EtatCommande) -> Literal["robotAeJung", "__end__"]:
+    def executerRobotAeJung(self, aeJungGraphe: StateGraph):
+    
+        self.aeJungGraphe = aeJungGraphe
+        config = {'recursion_limit': 100}
+        self.aeJungGraphe.invoke({'messages': []}, config)
+    
+
+    def possiblementQuitterNoeudHumain(self, etatCommande: EtatCommande) -> Literal["robotAeJung", "__end__"]:
         '''
-        Voie vers le chatbot à moins que l'utilisateur est en train de partir
+        Voie vers l'agent conversationnel à moins que l'utilisateur est en train de partir.
         '''
         if etatCommande.get('fin', False):
             return END
@@ -110,22 +262,37 @@ class RobotAeJung():
             return "robotAeJung"
 
 
-    def noeudHumain(self,etatCommande: EtatCommande) -> EtatCommande:
+    def possiblementVoieVersOutils(self, etatCommande: EtatCommande) -> Literal["outils", "humain"]:
         '''
-    Affiche le dernier message du modèle à l'utilisateur, et reçoit l'input de l'utilisateur.
+        Voie vers les noeuds humain et outil en fonction de l'appel outil effectué. 
+        '''
+        if not (messages:=  etatCommande.get("messages", [])):
+            raiseValueError(f"pas de message trouvé en parsant : {etatCommande}")
+
+        # seulement pointer vers le dernier message
+        message = messages[-1]
+        if hasattr(message, "appelOutils") and len(message.appelOutils) > 0:
+            return "outils"
+        else:
+            return "humain" 
+    
+
+    def noeudHumain(self, etatCommande: EtatCommande) -> EtatCommande:
+        '''
+        Affiche le dernier message du modèle à l'utilisateur, et reçoit l'input de l'utilisateur.
         '''
         self.etatCommande = etatCommande
         dernierMessage = self.etatCommande["messages"][-1]
 
-        inputUtilisateur = input("Utilisateur: ")
+        demandeUtilisateur = input("Utilisateur: ")
 
         # Si l'utilisateur essaie de quitter, considérer la conversation comme terminée.
-        if inputUtilisateur in {"q", "quit", "exit", "goodbye"}:
+        if demandeUtilisateur in {"q", "quit", "exit", "goodbye"}:
             self.etatCommande["fin"] = True
         
-        return self.etatCommande | {"messages": [("user", inputUtilisateur)]}
+        return self.etatCommande | {"messages": [("user", demandeUtilisateur)]}
 
-    def noeudRobot(self, etatCommande: EtatCommande, aeJungSystint, nomModeleIAGenerative) -> EtatCommande:
+    def noeudRobot(self, etatCommande: EtatCommande, aeJungInstructionsModele, nomModeleIAGenerative) -> EtatCommande:
         
         self.nomModeleIAGenerative = nomModeleIAGenerative
 
@@ -134,11 +301,11 @@ class RobotAeJung():
 
         self.etatCommande = etatCommande
 
-        self.aeJungSystint = aeJungSystint
+        self.aeJungInstructionsModele = aeJungInstructionsModele
 
         if self.etatCommande:
 
-            messageSortie = llm.invoke([self.aeJungSystint] + self.etatCommande["messages"])
+            messageSortie = modeleLangageMassif.invoke([self.aeJungInstructionsModele] + self.etatCommande["messages"])
 
         else:
 
@@ -148,17 +315,64 @@ class RobotAeJung():
 
 
     @tool
-    def afficher_menu(self, menu) -> str:
+    def afficherMenu(self) -> str:
         '''
         Présente la dernière version à jour du menu.
         '''
-        # Note that this is just hard-coded text, but you could connect this to a live stock
-        # database, or you could use Gemini's multi-modal capabilities and take live photos of
-        # your cafe's chalk menu or the products on the counter and assemble them into an input.
-        self.menu = menu
+        
         return self.menu
 
-aeJungSystint = (
+
+    @tool
+    def ajouterCommande(self, elementsPlatBoisson: str, modificateurs: Iterable[str]) -> str:
+        '''
+        Ajoute l'élément de plat ou boisson spécifié à la commande du client en incluant les modificateurs.
+        Retourne:
+            La commande mise à jour en cours de traitement.
+        '''
+
+
+    @tool
+    def confirmerCommande(self) -> str:
+        '''
+        Demande au client si la commande est correcte.
+        Retourne:
+            La réponse du client.
+        '''
+
+    @tool
+    def enleverElementsCommande(self, elementsPlatBoisson: str, modificateurs: Iterable[str]) -> str:
+         '''
+         Enlève les éléments de la commande si le client veut enlever ces éléments.
+
+         Retourne:
+             La commande mise à jour par le client.
+         '''
+
+
+    @tool
+    def prendreCommande(self) -> str:
+        '''
+        Retourne la commande du client en cours de traitement. Un élément par ligne. Chaque élément est suivi de la quantité (nombre entier)
+        '''
+
+
+    @tool
+    def supprimerCommande(self):
+        '''
+        Supprime tous les éléments de la commande du client
+        '''
+
+    @tool
+    def executerCommande(self) -> int:
+        '''
+        Envoie la commande à la propriétaire du restaurant  pour délivrer la commande.
+        Besoin de connecter avec système de comptabilité. 
+        Retourne:
+            Le nombre de minutes moyen nécessaire pour que la commande soit prête.
+        '''
+
+aeJungInstructionsModele = (
     "system",  # 'system' indique que le message est une instruction système.
     "Vous êtes un robot de commande pour un restaurant de street food coréen, un système interactif de commande de restaurant coréen. Un humain va vous parler des "
     "produits disponibles et vous répondrez à toutes les questions concernant les articles du menu (et uniquement sur "
@@ -166,16 +380,16 @@ aeJungSystint = (
     "Le client passera une commande pour un ou plusieurs articles du menu, que vous structurerez "
     "et enverrez au système de commande après avoir confirmé la commande avec l'humain. Veuillez demander aux clients s'ils souhaitent manger au restaurant ou à emporter."
     "\n\n"
-    "Ajoutez des articles à la commande du client avec ajouter_a_la_commande, et réinitialisez la commande avec reinitialiser_commande."
+    "Ajoutez des articles à la commande du client avec ajouterCommande, et réinitialisez la commande avec reinitialiserCommande."
     # Retirez des articles de la commande avec retirer_articles_de_la_commande"
-    "Pour voir le contenu de la commande jusqu'à présent, appelez prendre_commande (cela vous est montré, pas à l'utilisateur). "
-    "Confirmez toujours la commande avec l'utilisateur (double vérification) avant d'appeler prendre_commande. L'appel à confirmer_commande affichera "
+    "Pour voir le contenu de la commande jusqu'à présent, appelez prendreCommande (cela vous est montré, pas à l'utilisateur). "
+    "Confirmez toujours la commande avec l'utilisateur (double vérification) avant d'appeler prendrecommande. L'appel à confirmerCommande affichera "
     "les articles de la commande à l'utilisateur et retournera leur réponse à la vue de la liste. Leur réponse peut contenir des modifications. "
     "Vérifiez toujours et répondez avec les noms des boissons, des plats et des modificateurs du MENU avant de les ajouter à la commande. "
     "Si vous n'êtes pas sûr qu'une boisson, un plat ou un modificateur corresponde à ceux du MENU, posez une question pour clarifier ou rediriger. "
     "Vous n'avez que les modificateurs listés dans le menu. "
-    "Une fois que le client a terminé de commander des articles, appelez confirmer_commande pour vous assurer qu'elle est correcte, puis faites "
-    "les mises à jour nécessaires et appelez ensuite prendre_commande. Une fois que prendre_commande a été appelée, remerciez l'utilisateur et "
+    "Une fois que le client a terminé de commander des articles, appelez confirmerCommande pour vous assurer qu'elle est correcte, puis faites "
+    "les mises à jour nécessaires et appelez ensuite prendreCommande. Une fois que prendreCommande a été appelée, remerciez l'utilisateur et "
     "dites au revoir!",
 )
 
@@ -238,7 +452,7 @@ menu = '''
 '''
 
 
-etatCommande = etatCommande = EtatCommande(messages=[], commande=[], fin=False)
-robotAeJung = RobotAeJung(aeJungSystint = aeJungSystint, messageBienvenue = messageBienvenue)
-chat = robotAeJung.initialisation(etatCommande = etatCommande, messageUtilisateur = 'bonjour, comment allez-vous ?', aeJungSystint = aeJungSystint)
-
+etatCommande = EtatCommande(messages=[], commande=[], fin=False)
+robotAeJung = RobotAeJung(aeJungInstructionsModele = aeJungInstructionsModele, messageBienvenue = messageBienvenue, menu = menu)
+robot = robotAeJung.initialisation(etatCommande = etatCommande, messageUtilisateur = 'bonjour, comment allez-vous ?', aeJungInstructionsModele = aeJungInstructionsModele)
+robotAeJung.executerRobotAeJung(robot)
