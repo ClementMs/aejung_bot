@@ -12,8 +12,9 @@ import os
 
 from IPython.display import Image, display
 
-os.environ["GOOGLE_API_KEY"] = 'AIzaSyBvoQ7FZSzGrVLQ3C6JmzF6EorJ8ZUex0A'
+api_cle_google  = os.environ['API_CLE_GOOGLE']
 
+os.environ["GOOGLE_API_KEY"] = api_cle_google
 
 
 
